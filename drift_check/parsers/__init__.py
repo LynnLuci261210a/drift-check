@@ -1,16 +1,25 @@
 """Parsers package for drift-check.
 
-Provides readers for Terraform state files and (in future) HCL config files.
-
-Example usage::
-
-    from drift_check.parsers.terraform_state import parse_state_file
-
-    resources = parse_state_file("terraform.tfstate")
-    for r in resources:
-        print(r.resource_id, r.attributes)
+Exposes the primary parsing utilities for both Terraform state files
+and live AWS infrastructure state.
 """
 
-from drift_check.parsers.terraform_state import TerraformResource, parse_state_file
+from drift_check.parsers.terraform_state import (
+    TerraformResource,
+    parse_state_file,
+    resource_id,
+)
+from drift_check.parsers.aws_state import (
+    LiveResource,
+    fetch_live_resources,
+    AWSStateError,
+)
 
-__all__ = ["TerraformResource", "parse_state_file"]
+__all__ = [
+    "TerraformResource",
+    "parse_state_file",
+    "resource_id",
+    "LiveResource",
+    "fetch_live_resources",
+    "AWSStateError",
+]
