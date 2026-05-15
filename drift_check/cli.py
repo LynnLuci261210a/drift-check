@@ -1,13 +1,16 @@
 """Command-line interface for drift-check."""
+from __future__ import annotations
 
-import sys
 import argparse
-import boto3
+import sys
+from typing import List
 
 from drift_check.parsers.terraform_state import parse_state_file
-from drift_check.parsers.aws_state import fetch_live_resources, AWSStateError
-from drift_check.drift_detector import detect_drift
+from drift_check.parsers.aws_state import fetch_live_resources
+from drift_check.drift_detector import detect_drift, DriftItem
+from drift_check.filters import FilterOptions, apply_filters
 from drift_check.reporter import report, OutputFormat
+from drift_check.formatters.sarif_reporter import render_sarif
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -15,69 +18,68 @@ def build_parser() -> argparse.ArgumentParser:
         prog="drift-check",
         description="Diff live AWS infrastructure against Terraform state.",
     )
-    parser.add_argument(
-        "state_file",
-        metavar="STATE_FILE",
-        help="Path to terraform.tfstate (or a remote state JSON export).",
-    )
+    parser.add_argument("state_file", help="Path to terraform.tfstate")
     parser.add_argument(
         "--format",
-        choices=[f.value for f in OutputFormat],
-        default=OutputFormat.TEXT.value,
-        dest="output_format",
-        help="Output format (default: text).",
-    )
-    parser.add_argument(
-        "--region",
-        default=None,
-        help="AWS region to query (overrides environment / profile default).",
-    )
-    parser.add_argument(
-        "--profile",
-        default=None,
-        help="AWS CLI profile to use.",
+        choices=[f.value for f in OutputFormat] + ["sarif"],
+        default="text",
+        help="Output format (default: text)",
     )
     parser.add_argument(
         "--exit-code",
         action="store_true",
-        dest="exit_code",
-        help="Exit with code 1 when drift is detected.",
+        help="Exit with code 1 when drift is detected",
+    )
+    parser.add_argument(
+        "--resource-type",
+        dest="resource_type",
+        default=None,
+        help="Filter by resource type prefix (e.g. aws_instance)",
+    )
+    parser.add_argument(
+        "--attribute",
+        dest="attribute",
+        default=None,
+        help="Only report drift on this attribute name",
+    )
+    parser.add_argument(
+        "--profile",
+        default=None,
+        help="AWS profile name",
+    )
+    parser.add_argument(
+        "--region",
+        default=None,
+        help="AWS region",
     )
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: List[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
 
-    # --- parse Terraform state ---
-    try:
-        tf_resources = parse_state_file(args.state_file)
-    except (FileNotFoundError, ValueError) as exc:
-        print(f"error: {exc}", file=sys.stderr)
-        return 2
+    tf_resources = parse_state_file(args.state_file)
+    live_resources = fetch_live_resources(
+        profile=args.profile,
+        region=args.region,
+    )
 
-    # --- fetch live AWS state ---
-    session_kwargs: dict = {}
-    if args.region:
-        session_kwargs["region_name"] = args.region
-    if args.profile:
-        session_kwargs["profile_name"] = args.profile
+    items: List[DriftItem] = detect_drift(tf_resources, live_resources)
 
-    session = boto3.Session(**session_kwargs)
+    filter_opts = FilterOptions(
+        resource_type=args.resource_type,
+        attribute=args.attribute,
+    )
+    items = apply_filters(items, filter_opts)
 
-    try:
-        live_resources = fetch_live_resources(session)
-    except AWSStateError as exc:
-        print(f"error fetching live state: {exc}", file=sys.stderr)
-        return 2
+    if args.format == "sarif":
+        print(render_sarif(items))
+    else:
+        fmt = OutputFormat(args.format)
+        report(items, fmt)
 
-    # --- detect drift and report ---
-    drift_items = detect_drift(tf_resources, live_resources)
-    output_format = OutputFormat(args.output_format)
-    print(report(drift_items, fmt=output_format))
-
-    if args.exit_code and drift_items:
+    if args.exit_code and items:
         return 1
     return 0
 

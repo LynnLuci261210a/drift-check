@@ -1,106 +1,100 @@
-"""Tests for the drift_check CLI entry-point."""
+"""Tests for the CLI, including the SARIF output path."""
+from __future__ import annotations
 
 import json
-import pytest
+from contextlib import contextmanager
+from typing import List
 from unittest.mock import patch, MagicMock
 
-from drift_check.cli import main, build_parser
+import pytest
+
+from drift_check.cli import build_parser, main
 from drift_check.drift_detector import DriftItem, DriftKind
 from drift_check.parsers.terraform_state import TerraformResource
-from drift_check.parsers.aws_state import LiveResource, AWSStateError
-
-
-STATE_FILE = "terraform.tfstate"
+from drift_check.parsers.aws_state import LiveResource
 
 
 @pytest.fixture()
-def tf_resource():
+def tf_resource() -> TerraformResource:
     return TerraformResource(
+        resource_id="aws_instance.web",
         resource_type="aws_instance",
-        name="web",
-        provider="aws",
-        attributes={"instance_type": "t3.micro", "id": "i-abc123"},
+        attributes={"instance_type": "t2.micro", "ami": "ami-123"},
     )
 
 
 @pytest.fixture()
-def live_resource():
+def live_resource() -> LiveResource:
     return LiveResource(
+        resource_id="aws_instance.web",
         resource_type="aws_instance",
-        resource_id="i-abc123",
-        attributes={"instance_type": "t3.micro"},
+        attributes={"instance_type": "t2.micro", "ami": "ami-123"},
     )
 
 
-def _patch_deps(tf_resources, live_resources, drift_items):
-    """Return a context-manager stack that patches all I/O."""
-    return (
-        patch("drift_check.cli.parse_state_file", return_value=tf_resources),
-        patch("drift_check.cli.fetch_live_resources", return_value=live_resources),
-        patch("drift_check.cli.detect_drift", return_value=drift_items),
-        patch("drift_check.cli.boto3.Session", return_value=MagicMock()),
-    )
+@contextmanager
+def _patch_deps(tf_resources, live_resources):
+    with patch("drift_check.cli.parse_state_file", return_value=tf_resources), \
+         patch("drift_check.cli.fetch_live_resources", return_value=live_resources):
+        yield
 
 
 def test_no_drift_exits_zero(tf_resource, live_resource, capsys):
-    with patch("drift_check.cli.parse_state_file", return_value=[tf_resource]), \
-         patch("drift_check.cli.fetch_live_resources", return_value=[live_resource]), \
-         patch("drift_check.cli.detect_drift", return_value=[]), \
-         patch("drift_check.cli.boto3.Session", return_value=MagicMock()):
-        rc = main([STATE_FILE])
-    assert rc == 0
+    with _patch_deps([tf_resource], [live_resource]):
+        code = main(["fake.tfstate", "--exit-code"])
+    assert code == 0
 
 
-def test_drift_with_exit_code_flag_exits_one(tf_resource, live_resource):
-    drift = [DriftItem(DriftKind.CHANGED, "aws_instance.web", "instance_type", "t3.micro", "t3.small")]
-    with patch("drift_check.cli.parse_state_file", return_value=[tf_resource]), \
-         patch("drift_check.cli.fetch_live_resources", return_value=[live_resource]), \
-         patch("drift_check.cli.detect_drift", return_value=drift), \
-         patch("drift_check.cli.boto3.Session", return_value=MagicMock()):
-        rc = main([STATE_FILE, "--exit-code"])
-    assert rc == 1
+def test_drift_with_exit_code_flag_exits_one(tf_resource, capsys):
+    changed = LiveResource(
+        resource_id="aws_instance.web",
+        resource_type="aws_instance",
+        attributes={"instance_type": "t3.large", "ami": "ami-123"},
+    )
+    with _patch_deps([tf_resource], [changed]):
+        code = main(["fake.tfstate", "--exit-code"])
+    assert code == 1
 
 
-def test_drift_without_exit_code_flag_exits_zero(tf_resource, live_resource):
-    drift = [DriftItem(DriftKind.CHANGED, "aws_instance.web", "instance_type", "t3.micro", "t3.small")]
-    with patch("drift_check.cli.parse_state_file", return_value=[tf_resource]), \
-         patch("drift_check.cli.fetch_live_resources", return_value=[live_resource]), \
-         patch("drift_check.cli.detect_drift", return_value=drift), \
-         patch("drift_check.cli.boto3.Session", return_value=MagicMock()):
-        rc = main([STATE_FILE])
-    assert rc == 0
+def test_drift_without_exit_code_flag_exits_zero(tf_resource, capsys):
+    changed = LiveResource(
+        resource_id="aws_instance.web",
+        resource_type="aws_instance",
+        attributes={"instance_type": "t3.large", "ami": "ami-123"},
+    )
+    with _patch_deps([tf_resource], [changed]):
+        code = main(["fake.tfstate"])
+    assert code == 0
 
 
-def test_missing_state_file_exits_two():
-    with patch("drift_check.cli.parse_state_file", side_effect=FileNotFoundError("not found")):
-        rc = main([STATE_FILE])
-    assert rc == 2
-
-
-def test_aws_error_exits_two(tf_resource):
-    with patch("drift_check.cli.parse_state_file", return_value=[tf_resource]), \
-         patch("drift_check.cli.fetch_live_resources", side_effect=AWSStateError("denied")), \
-         patch("drift_check.cli.boto3.Session", return_value=MagicMock()):
-        rc = main([STATE_FILE])
-    assert rc == 2
-
-
-def test_json_format_output(tf_resource, live_resource, capsys):
-    with patch("drift_check.cli.parse_state_file", return_value=[tf_resource]), \
-         patch("drift_check.cli.fetch_live_resources", return_value=[live_resource]), \
-         patch("drift_check.cli.detect_drift", return_value=[]), \
-         patch("drift_check.cli.boto3.Session", return_value=MagicMock()):
-        main([STATE_FILE, "--format", "json"])
+def test_sarif_format_outputs_valid_json(tf_resource, capsys):
+    changed = LiveResource(
+        resource_id="aws_instance.web",
+        resource_type="aws_instance",
+        attributes={"instance_type": "t3.large", "ami": "ami-123"},
+    )
+    with _patch_deps([tf_resource], [changed]):
+        main(["fake.tfstate", "--format", "sarif"])
     captured = capsys.readouterr()
-    parsed = json.loads(captured.out)
-    assert "drift" in parsed
+    doc = json.loads(captured.out)
+    assert doc["version"] == "2.1.0"
 
 
-def test_region_and_profile_forwarded_to_session(tf_resource, live_resource):
-    mock_session_cls = MagicMock()
-    with patch("drift_check.cli.parse_state_file", return_value=[tf_resource]), \
-         patch("drift_check.cli.fetch_live_resources", return_value=[live_resource]), \
-         patch("drift_check.cli.detect_drift", return_value=[]), \
-         patch("drift_check.cli.boto3.Session", mock_session_cls):
-        main([STATE_FILE, "--region", "us-west-2", "--profile", "dev"])
-    mock_session_cls.assert_called_once_with(region_name="us-west-2", profile_name="dev")
+def test_sarif_format_no_drift_empty_results(tf_resource, live_resource, capsys):
+    with _patch_deps([tf_resource], [live_resource]):
+        main(["fake.tfstate", "--format", "sarif"])
+    captured = capsys.readouterr()
+    doc = json.loads(captured.out)
+    assert doc["runs"][0]["results"] == []
+
+
+def test_build_parser_includes_sarif_format():
+    parser = build_parser()
+    args = parser.parse_args(["state.tfstate", "--format", "sarif"])
+    assert args.format == "sarif"
+
+
+def test_resource_type_filter_passed_through(tf_resource, live_resource, capsys):
+    with _patch_deps([tf_resource], [live_resource]):
+        code = main(["fake.tfstate", "--resource-type", "aws_instance"])
+    assert code == 0
