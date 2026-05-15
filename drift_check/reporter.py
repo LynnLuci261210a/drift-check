@@ -1,73 +1,68 @@
-"""Formats and outputs drift detection results."""
-
+"""Core reporter: dispatches to the appropriate formatter and writes output."""
 from __future__ import annotations
 
 import json
 import sys
 from enum import Enum
-from typing import IO, List
+from typing import Sequence, TextIO
 
 from drift_check.drift_detector import DriftItem, DriftKind
+from drift_check.formatters.html_reporter import render_html
+from drift_check.formatters.csv_reporter import render_csv
+from drift_check.formatters.markdown_reporter import render_markdown
 
 
 class OutputFormat(str, Enum):
     TEXT = "text"
     JSON = "json"
+    HTML = "html"
+    CSV = "csv"
+    MARKDOWN = "markdown"
 
 
 def _kind_label(kind: DriftKind) -> str:
-    labels = {
-        DriftKind.CHANGED: "CHANGED",
-        DriftKind.MISSING_LIVE: "MISSING (live)",
-        DriftKind.MISSING_TERRAFORM: "MISSING (terraform)",
-    }
-    return labels.get(kind, kind.value)
+    return kind.value.replace("_", " ").upper()
 
 
-def render_text(items: List[DriftItem], out: IO[str] = sys.stdout) -> None:
-    """Write a human-readable drift report to *out*."""
+def render_text(items: Sequence[DriftItem]) -> str:
     if not items:
-        out.write("No drift detected.\n")
-        return
-
-    out.write(f"Drift detected — {len(items)} issue(s):\n")
+        return "No drift detected.\n"
+    lines: list[str] = [f"{len(items)} drift item(s) found:\n"]
     for item in items:
-        out.write(f"\n  [{_kind_label(item.kind)}] {item.resource_id}\n")
-        if item.attribute:
-            out.write(f"    attribute : {item.attribute}\n")
-        if item.expected is not None:
-            out.write(f"    expected  : {item.expected}\n")
-        if item.actual is not None:
-            out.write(f"    actual    : {item.actual}\n")
+        lines.append(f"  [{_kind_label(item.kind)}] {item.resource_id} ({item.resource_type})")
+        for attr, (expected, actual) in item.attribute_diffs.items():
+            lines.append(f"    {attr}: expected={expected!r} actual={actual!r}")
+    return "\n".join(lines) + "\n"
 
 
-def render_json(items: List[DriftItem], out: IO[str] = sys.stdout) -> None:
-    """Write a JSON drift report to *out*."""
+def render_json(items: Sequence[DriftItem]) -> str:
     payload = [
         {
             "resource_id": item.resource_id,
+            "resource_type": item.resource_type,
             "kind": item.kind.value,
-            "attribute": item.attribute,
-            "expected": item.expected,
-            "actual": item.actual,
+            "attribute_diffs": {
+                k: {"expected": exp, "actual": act}
+                for k, (exp, act) in item.attribute_diffs.items()
+            },
         }
         for item in items
     ]
-    json.dump({"drift_count": len(items), "items": payload}, out, indent=2)
-    out.write("\n")
+    return json.dumps(payload, indent=2)
 
 
 def report(
-    items: List[DriftItem],
+    items: Sequence[DriftItem],
     fmt: OutputFormat = OutputFormat.TEXT,
-    out: IO[str] = sys.stdout,
-) -> int:
-    """Render *items* in the requested format and return an exit code.
-
-    Returns 1 when drift is present, 0 otherwise.
-    """
-    if fmt == OutputFormat.JSON:
-        render_json(items, out)
-    else:
-        render_text(items, out)
-    return 1 if items else 0
+    out: TextIO = sys.stdout,
+) -> None:
+    """Render *items* in the requested format and write to *out*."""
+    renderers = {
+        OutputFormat.TEXT: render_text,
+        OutputFormat.JSON: render_json,
+        OutputFormat.HTML: render_html,
+        OutputFormat.CSV: render_csv,
+        OutputFormat.MARKDOWN: render_markdown,
+    }
+    renderer = renderers[fmt]
+    out.write(renderer(items))
