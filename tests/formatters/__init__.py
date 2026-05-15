@@ -1,1 +1,1 @@
-"""Tests for drift_check.formatters package."""
+"""Tests for drift_check.formatters."""
