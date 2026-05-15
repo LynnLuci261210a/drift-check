@@ -1,15 +1,12 @@
-"""Core reporter: dispatches to the appropriate formatter and writes output."""
+"""Core reporter that dispatches to the appropriate formatter."""
 from __future__ import annotations
 
 import json
-import sys
 from enum import Enum
-from typing import Sequence, TextIO
+from typing import List
 
 from drift_check.drift_detector import DriftItem, DriftKind
-from drift_check.formatters.html_reporter import render_html
-from drift_check.formatters.csv_reporter import render_csv
-from drift_check.formatters.markdown_reporter import render_markdown
+from drift_check.formatters import render_html, render_csv, render_markdown, render_junit
 
 
 class OutputFormat(str, Enum):
@@ -18,32 +15,36 @@ class OutputFormat(str, Enum):
     HTML = "html"
     CSV = "csv"
     MARKDOWN = "markdown"
+    JUNIT = "junit"
 
 
 def _kind_label(kind: DriftKind) -> str:
-    return kind.value.replace("_", " ").upper()
+    return {
+        DriftKind.CHANGED: "CHANGED",
+        DriftKind.MISSING_LIVE: "MISSING_LIVE",
+        DriftKind.EXTRA_LIVE: "EXTRA_LIVE",
+    }[kind]
 
 
-def render_text(items: Sequence[DriftItem]) -> str:
+def render_text(items: List[DriftItem]) -> str:
     if not items:
         return "No drift detected.\n"
-    lines: list[str] = [f"{len(items)} drift item(s) found:\n"]
+    lines: list[str] = []
     for item in items:
-        lines.append(f"  [{_kind_label(item.kind)}] {item.resource_id} ({item.resource_type})")
-        for attr, (expected, actual) in item.attribute_diffs.items():
-            lines.append(f"    {attr}: expected={expected!r} actual={actual!r}")
+        lines.append(f"[{_kind_label(item.kind)}] {item.resource_id}")
+        for attr, (expected, actual) in (item.diff or {}).items():
+            lines.append(f"  {attr}: {expected!r} -> {actual!r}")
     return "\n".join(lines) + "\n"
 
 
-def render_json(items: Sequence[DriftItem]) -> str:
+def render_json(items: List[DriftItem]) -> str:
     payload = [
         {
             "resource_id": item.resource_id,
-            "resource_type": item.resource_type,
-            "kind": item.kind.value,
-            "attribute_diffs": {
+            "kind": _kind_label(item.kind),
+            "diff": {
                 k: {"expected": exp, "actual": act}
-                for k, (exp, act) in item.attribute_diffs.items()
+                for k, (exp, act) in (item.diff or {}).items()
             },
         }
         for item in items
@@ -52,17 +53,17 @@ def render_json(items: Sequence[DriftItem]) -> str:
 
 
 def report(
-    items: Sequence[DriftItem],
+    items: List[DriftItem],
     fmt: OutputFormat = OutputFormat.TEXT,
-    out: TextIO = sys.stdout,
-) -> None:
-    """Render *items* in the requested format and write to *out*."""
-    renderers = {
+) -> str:
+    """Render *items* using the requested *fmt* and return the string."""
+    dispatch = {
         OutputFormat.TEXT: render_text,
         OutputFormat.JSON: render_json,
         OutputFormat.HTML: render_html,
         OutputFormat.CSV: render_csv,
         OutputFormat.MARKDOWN: render_markdown,
+        OutputFormat.JUNIT: render_junit,
     }
-    renderer = renderers[fmt]
-    out.write(renderer(items))
+    renderer = dispatch[fmt]
+    return renderer(items)
