@@ -1,1 +1,1 @@
-"""Drift-check output formatters package."""
+"""Formatters package for drift-check output renderers."""
