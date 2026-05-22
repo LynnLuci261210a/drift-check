@@ -3,54 +3,37 @@ from __future__ import annotations
 
 from typing import Callable, Dict, List
 
-from drift_check.formatters.csv_reporter import render_csv
-from drift_check.formatters.datadog_reporter import render_datadog
-from drift_check.formatters.dotenv_reporter import render_dotenv
-from drift_check.formatters.excel_reporter import render_excel
-from drift_check.formatters.graphite_reporter import render_graphite
-from drift_check.formatters.html_reporter import render_html
-from drift_check.formatters.influxdb_reporter import render_influxdb
-from drift_check.formatters.junit_reporter import render_junit
-from drift_check.formatters.markdown_reporter import render_markdown
-from drift_check.formatters.ndjson_reporter import render_ndjson
-from drift_check.formatters.newrelic_reporter import render_newrelic
-from drift_check.formatters.opsgenie_reporter import render_opsgenie
-from drift_check.formatters.pagerduty_reporter import render_pagerduty
-from drift_check.formatters.pdf_reporter import render_pdf
-from drift_check.formatters.prometheus_reporter import render_prometheus
-from drift_check.formatters.sarif_reporter import render_sarif
-from drift_check.formatters.slack_reporter import render_slack
-from drift_check.formatters.splunk_reporter import render_splunk
-from drift_check.formatters.syslog_reporter import render_syslog
-from drift_check.formatters.teamcity_reporter import render_teamcity
-from drift_check.formatters.terraform_reporter import render_terraform
-from drift_check.formatters.webhook_reporter import render_webhook
-from drift_check.formatters.yaml_reporter import render_yaml
+from drift_check.drift_detector import DriftItem
 
-_REGISTRY: Dict[str, Callable] = {
-    "csv": render_csv,
-    "datadog": render_datadog,
-    "dotenv": render_dotenv,
-    "excel": render_excel,
-    "graphite": render_graphite,
-    "html": render_html,
-    "influxdb": render_influxdb,
-    "junit": render_junit,
-    "markdown": render_markdown,
-    "ndjson": render_ndjson,
-    "newrelic": render_newrelic,
-    "opsgenie": render_opsgenie,
-    "pagerduty": render_pagerduty,
-    "pdf": render_pdf,
-    "prometheus": render_prometheus,
-    "sarif": render_sarif,
-    "slack": render_slack,
-    "splunk": render_splunk,
-    "syslog": render_syslog,
-    "teamcity": render_teamcity,
-    "terraform": render_terraform,
-    "webhook": render_webhook,
-    "yaml": render_yaml,
+# Lazy imports keep optional heavy dependencies (openpyxl, reportlab, …) out of
+# the critical path until a specific formatter is actually requested.
+_REGISTRY: Dict[str, str] = {
+    "text": "drift_check.reporter:render_text",
+    "json": "drift_check.reporter:render_json",
+    "html": "drift_check.formatters.html_reporter:render_html",
+    "csv": "drift_check.formatters.csv_reporter:render_csv",
+    "markdown": "drift_check.formatters.markdown_reporter:render_markdown",
+    "junit": "drift_check.formatters.junit_reporter:render_junit",
+    "slack": "drift_check.formatters.slack_reporter:render_slack",
+    "sarif": "drift_check.formatters.sarif_reporter:render_sarif",
+    "excel": "drift_check.formatters.excel_reporter:render_excel",
+    "pdf": "drift_check.formatters.pdf_reporter:render_pdf",
+    "yaml": "drift_check.formatters.yaml_reporter:render_yaml",
+    "prometheus": "drift_check.formatters.prometheus_reporter:render_prometheus",
+    "graphite": "drift_check.formatters.graphite_reporter:render_graphite",
+    "influxdb": "drift_check.formatters.influxdb_reporter:render_influxdb",
+    "datadog": "drift_check.formatters.datadog_reporter:render_datadog",
+    "opsgenie": "drift_check.formatters.opsgenie_reporter:render_opsgenie",
+    "splunk": "drift_check.formatters.splunk_reporter:render_splunk",
+    "newrelic": "drift_check.formatters.newrelic_reporter:render_newrelic",
+    "syslog": "drift_check.formatters.syslog_reporter:render_syslog",
+    "pagerduty": "drift_check.formatters.pagerduty_reporter:render_pagerduty",
+    "webhook": "drift_check.formatters.webhook_reporter:render_webhook",
+    "dotenv": "drift_check.formatters.dotenv_reporter:render_dotenv",
+    "teamcity": "drift_check.formatters.teamcity_reporter:render_teamcity",
+    "ndjson": "drift_check.formatters.ndjson_reporter:render_ndjson",
+    "terraform": "drift_check.formatters.terraform_reporter:render_terraform",
+    "sonarqube": "drift_check.formatters.sonarqube_reporter:render_sonarqube",
 }
 
 
@@ -59,9 +42,19 @@ def get_available_formatters() -> List[str]:
     return sorted(_REGISTRY.keys())
 
 
-def get_formatter(name: str) -> Callable:
-    """Return formatter callable by name, raising KeyError if unknown."""
+def get_formatter(name: str) -> Callable[[List[DriftItem]], str]:
+    """Return the render callable for *name*, importing it on demand.
+
+    Raises
+    ------
+    KeyError
+        If *name* is not a registered formatter.
+    """
     if name not in _REGISTRY:
         available = ", ".join(get_available_formatters())
         raise KeyError(f"Unknown formatter {name!r}. Available: {available}")
-    return _REGISTRY[name]
+
+    module_path, func_name = _REGISTRY[name].rsplit(":", 1)
+    import importlib
+    module = importlib.import_module(module_path)
+    return getattr(module, func_name)
