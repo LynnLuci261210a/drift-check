@@ -1,12 +1,31 @@
-"""Formatters package for drift-check output renderers."""
+"""Formatter registry for drift-check output formats."""
+from __future__ import annotations
 
-from typing import List
 
-
-def get_available_formatters() -> List[str]:
-    """Return a list of available formatter names.
-
-    Returns:
-        A list of strings representing the names of all registered formatters.
-    """
-    return ["text", "json", "yaml"]
+def get_available_formatters() -> list[str]:
+    """Return the list of all registered output format names."""
+    return [
+        "text",
+        "json",
+        "html",
+        "csv",
+        "markdown",
+        "junit",
+        "slack",
+        "sarif",
+        "excel",
+        "pdf",
+        "yaml",
+        "prometheus",
+        "graphite",
+        "influxdb",
+        "datadog",
+        "opsgenie",
+        "splunk",
+        "newrelic",
+        "syslog",
+        "pagerduty",
+        "webhook",
+        "dotenv",
+        "teamcity",
+    ]
