@@ -5,11 +5,7 @@ from typing import Callable, Dict, List
 
 from drift_check.drift_detector import DriftItem
 
-# Lazy imports keep optional heavy dependencies (openpyxl, reportlab, …) out of
-# the critical path until a specific formatter is actually requested.
 _REGISTRY: Dict[str, str] = {
-    "text": "drift_check.reporter:render_text",
-    "json": "drift_check.reporter:render_json",
     "html": "drift_check.formatters.html_reporter:render_html",
     "csv": "drift_check.formatters.csv_reporter:render_csv",
     "markdown": "drift_check.formatters.markdown_reporter:render_markdown",
@@ -34,16 +30,18 @@ _REGISTRY: Dict[str, str] = {
     "ndjson": "drift_check.formatters.ndjson_reporter:render_ndjson",
     "terraform": "drift_check.formatters.terraform_reporter:render_terraform",
     "sonarqube": "drift_check.formatters.sonarqube_reporter:render_sonarqube",
+    "azure_devops": "drift_check.formatters.azure_devops_reporter:render_azure_devops",
+    "github": "drift_check.formatters.github_reporter:render_github",
 }
 
 
 def get_available_formatters() -> List[str]:
-    """Return sorted list of registered formatter names."""
-    return sorted(_REGISTRY.keys())
+    """Return the names of all registered output formatters."""
+    return list(_REGISTRY.keys())
 
 
 def get_formatter(name: str) -> Callable[[List[DriftItem]], str]:
-    """Return the render callable for *name*, importing it on demand.
+    """Return the render callable for *name*.
 
     Raises
     ------
@@ -51,10 +49,9 @@ def get_formatter(name: str) -> Callable[[List[DriftItem]], str]:
         If *name* is not a registered formatter.
     """
     if name not in _REGISTRY:
-        available = ", ".join(get_available_formatters())
-        raise KeyError(f"Unknown formatter {name!r}. Available: {available}")
+        raise KeyError(f"Unknown formatter: {name!r}. Available: {get_available_formatters()}")
 
     module_path, func_name = _REGISTRY[name].rsplit(":", 1)
     import importlib
     module = importlib.import_module(module_path)
-    return getattr(module, func_name)
+    return getattr(module, func_name)  # type: ignore[return-value]
