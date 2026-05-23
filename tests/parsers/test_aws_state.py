@@ -8,7 +8,16 @@ from drift_check.parsers.aws_state import fetch_live_resources, LiveResource
 
 
 def _make_session(ec2_instances=None, s3_buckets=None):
-    """Build a mock boto3 session."""
+    """Build a mock boto3 session.
+
+    Args:
+        ec2_instances: List of EC2 instance dicts to return from the paginator.
+        s3_buckets: List of S3 bucket dicts to return from list_buckets.
+
+    Returns:
+        A MagicMock session whose ``client()`` factory returns pre-configured
+        EC2 and S3 client mocks.
+    """
     session = MagicMock()
 
     ec2_client = MagicMock()
@@ -87,3 +96,17 @@ def test_live_resource_equality():
     a = LiveResource(resource_type="aws_instance", resource_id="i-1")
     b = LiveResource(resource_type="aws_instance", resource_id="i-1", attributes={"x": 1})
     assert a == b
+
+
+def test_fetch_ec2_instances_empty():
+    """Fetching EC2 instances when none exist should return an empty list."""
+    session = _make_session(ec2_instances=[])
+    resources = fetch_live_resources(session, resource_types=["aws_instance"])
+    assert resources == []
+
+
+def test_fetch_s3_buckets_empty():
+    """Fetching S3 buckets when none exist should return an empty list."""
+    session = _make_session(s3_buckets=[])
+    resources = fetch_live_resources(session, resource_types=["aws_s3_bucket"])
+    assert resources == []
