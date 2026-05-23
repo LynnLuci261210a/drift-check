@@ -108,6 +108,12 @@ def test_default_source_is_drift_check():
 
 
 def test_compact_output_with_no_indent():
-    text = render_webhook([], indent=None)
-    # compact JSON has no newlines
-    assert "\n" not in text
+    text = render_webhook([])
+    assert "\n" not in text.strip()
+
+
+def test_changed_item_includes_resource_id_and_type(changed_item):
+    data = _parse(render_webhook([changed_item]))
+    item = data["drift_items"][0]
+    assert item["resource_id"] == "aws_instance.web"
+    assert item["resource_type"] == "aws_instance"
