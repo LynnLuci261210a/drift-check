@@ -37,7 +37,13 @@ def extra_item() -> DriftItem:
 
 
 def _parse(output: str) -> dict:
+    """Parse a JSON string returned by render_slack into a dict."""
     return json.loads(output)
+
+
+def _get_attachment(output: str, index: int = 0) -> dict:
+    """Return a single attachment from a rendered Slack payload."""
+    return _parse(output)["attachments"][index]
 
 
 def test_no_drift_produces_success_message():
@@ -58,31 +64,28 @@ def test_drift_count_in_header(changed_item, missing_item):
 
 
 def test_changed_item_has_warning_emoji(changed_item):
-    result = _parse(render_slack([changed_item]))
-    attachment = result["attachments"][0]
+    attachment = _get_attachment(render_slack([changed_item]))
     assert ":warning:" in attachment["title"]
 
 
 def test_missing_item_has_x_emoji(missing_item):
-    result = _parse(render_slack([missing_item]))
-    attachment = result["attachments"][0]
+    attachment = _get_attachment(render_slack([missing_item]))
     assert ":x:" in attachment["title"]
 
 
 def test_extra_item_has_plus_emoji(extra_item):
-    result = _parse(render_slack([extra_item]))
-    attachment = result["attachments"][0]
+    attachment = _get_attachment(render_slack([extra_item]))
     assert ":heavy_plus_sign:" in attachment["title"]
 
 
 def test_resource_id_in_attachment_title(changed_item):
-    result = _parse(render_slack([changed_item]))
-    assert "aws_instance.web" in result["attachments"][0]["title"]
+    attachment = _get_attachment(render_slack([changed_item]))
+    assert "aws_instance.web" in attachment["title"]
 
 
 def test_attribute_diff_appears_as_fields(changed_item):
-    result = _parse(render_slack([changed_item]))
-    fields = result["attachments"][0]["fields"]
+    attachment = _get_attachment(render_slack([changed_item]))
+    fields = attachment["fields"]
     assert len(fields) == 1
     assert fields[0]["title"] == "instance_type"
     assert "t2.micro" in fields[0]["value"]
@@ -90,14 +93,13 @@ def test_attribute_diff_appears_as_fields(changed_item):
 
 
 def test_missing_item_has_no_fields(missing_item):
-    result = _parse(render_slack([missing_item]))
-    fields = result["attachments"][0]["fields"]
-    assert fields == []
+    attachment = _get_attachment(render_slack([missing_item]))
+    assert attachment["fields"] == []
 
 
 def test_changed_attachment_color_is_orange(changed_item):
-    result = _parse(render_slack([changed_item]))
-    assert result["attachments"][0]["color"] == "#FFA500"
+    attachment = _get_attachment(render_slack([changed_item]))
+    assert attachment["color"] == "#FFA500"
 
 
 def test_multiple_items_produce_multiple_attachments(changed_item, missing_item, extra_item):
